@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
-import { Heart, Music, ListMusic, Info, Shuffle, ExternalLink, AlertCircle, Loader2 } from 'lucide-react'
+import { useState, useEffect, useCallback } from 'react'
+import { Heart, Music, ListMusic, Info, Shuffle, ExternalLink } from 'lucide-react'
 import confetti from 'canvas-confetti'
 
 // ---------------------------------------------------------------------------
@@ -14,58 +14,10 @@ function toEmbedUrl(url) {
   return `https://open.spotify.com/embed/${match[1]}/${match[2]}?utm_source=generator&theme=0`
 }
 
-function getUrlType(url) {
+function getTypeLabel(url) {
   const match = url.match(/open\.spotify\.com\/(track|album|playlist|episode|show)\//)
-  const labels = { track: 'Titre', album: 'Album', playlist: 'Playlist', episode: 'Épisode', show: 'Podcast' }
-  return { key: match?.[1] ?? 'unknown', label: labels[match?.[1]] ?? 'Lien' }
-}
-
-function extractPlaylistId(url) {
-  const match = url.match(/open\.spotify\.com\/playlist\/([a-zA-Z0-9]+)/)
-  return match?.[1] ?? null
-}
-
-/**
- * Expands playlist URLs into individual track URLs via the Netlify function.
- * Non-playlist URLs pass through unchanged.
- * Results are cached in sessionStorage so we only call the API once per session.
- */
-async function expandSongs(songs) {
-  const tracks = []
-
-  for (const url of songs) {
-    const playlistId = extractPlaylistId(url)
-
-    if (!playlistId) {
-      tracks.push(url)
-      continue
-    }
-
-    const cacheKey = `playlist_tracks_${playlistId}`
-    const cached = sessionStorage.getItem(cacheKey)
-    if (cached) {
-      tracks.push(...JSON.parse(cached))
-      continue
-    }
-
-    try {
-      const res = await fetch(`/.netlify/functions/get-playlist-tracks?playlistId=${playlistId}`)
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const playlistTracks = await res.json()
-      if (Array.isArray(playlistTracks) && playlistTracks.length > 0) {
-        sessionStorage.setItem(cacheKey, JSON.stringify(playlistTracks))
-        tracks.push(...playlistTracks)
-      } else {
-        // Function returned no tracks — fall back to the playlist embed
-        tracks.push(url)
-      }
-    } catch {
-      // Network error or function not configured — fall back to playlist embed
-      tracks.push(url)
-    }
-  }
-
-  return tracks
+  const map = { track: 'Titre', album: 'Album', playlist: 'Playlist', episode: 'Épisode', show: 'Podcast' }
+  return map[match?.[1]] ?? 'Lien'
 }
 
 function launchConfetti() {
@@ -78,16 +30,18 @@ function launchConfetti() {
 }
 
 // ---------------------------------------------------------------------------
-// Shared sub-components
+// Sub-components
 // ---------------------------------------------------------------------------
 
-function HeartLoader({ label = 'Bruno choisit pour toi…' }) {
+function HeartLoader() {
   return (
     <div className="flex flex-col items-center gap-4 py-10">
       <div className="animate-heartbeat text-pink-400">
         <Heart className="w-20 h-20 fill-current drop-shadow-md" />
       </div>
-      <p className="text-pink-500 font-semibold text-lg tracking-wide">{label}</p>
+      <p className="text-pink-500 font-semibold text-lg tracking-wide">
+        Bruno choisit pour toi…
+      </p>
     </div>
   )
 }
@@ -97,11 +51,7 @@ function SpotifyEmbed({ url }) {
   const embedUrl = toEmbedUrl(url)
 
   if (!embedUrl) {
-    return (
-      <div className="text-center p-6 text-rose-400 bg-rose-50 rounded-2xl">
-        Lien Spotify invalide.
-      </div>
-    )
+    return <div className="text-center p-6 text-rose-400 bg-rose-50 rounded-2xl">Lien invalide.</div>
   }
 
   return (
@@ -135,44 +85,19 @@ function SpotifyEmbed({ url }) {
 
 function MaminetteTab({ songs }) {
   const [currentUrl, setCurrentUrl] = useState(null)
-  // 'idle' | 'expanding' | 'picking'
-  const [phase, setPhase] = useState('idle')
-  const expandedRef = useRef([])
+  const [isRevealing, setIsRevealing] = useState(false)
 
-  const handleSuggest = useCallback(async () => {
-    if (songs.length === 0 || phase !== 'idle') return
-
+  const handleSuggest = useCallback(() => {
+    if (songs.length === 0 || isRevealing) return
+    setIsRevealing(true)
     setCurrentUrl(null)
-
-    // If we haven't expanded playlists yet, do it now
-    if (expandedRef.current.length === 0) {
-      setPhase('expanding')
-      expandedRef.current = await expandSongs(songs)
-    }
-
-    if (expandedRef.current.length === 0) {
-      setPhase('idle')
-      return
-    }
-
-    setPhase('picking')
     setTimeout(() => {
-      const pool = expandedRef.current
-      const pick = pool[Math.floor(Math.random() * pool.length)]
+      const pick = songs[Math.floor(Math.random() * songs.length)]
       setCurrentUrl(pick)
-      setPhase('idle')
+      setIsRevealing(false)
       launchConfetti()
-    }, 1400)
-  }, [songs, phase])
-
-  // Invalidate expansion cache when songs list changes
-  useEffect(() => {
-    expandedRef.current = []
-    setCurrentUrl(null)
-    setPhase('idle')
-  }, [songs])
-
-  const isLoading = phase === 'expanding' || phase === 'picking'
+    }, 1600)
+  }, [songs, isRevealing])
 
   return (
     <div className="flex flex-col items-center gap-6 px-4 py-8">
@@ -189,10 +114,10 @@ function MaminetteTab({ songs }) {
         </p>
       </div>
 
-      {/* CTA button */}
+      {/* CTA */}
       <button
         onClick={handleSuggest}
-        disabled={isLoading || songs.length === 0}
+        disabled={isRevealing || songs.length === 0}
         className="
           group relative w-full max-w-sm py-5 px-6
           bg-gradient-to-r from-pink-400 to-rose-400
@@ -208,17 +133,9 @@ function MaminetteTab({ songs }) {
         <Heart className="w-5 h-5 fill-current flex-shrink-0" />
       </button>
 
-      {/* Loading states */}
-      {phase === 'expanding' && (
-        <div className="flex flex-col items-center gap-3 py-4">
-          <Loader2 className="w-10 h-10 text-pink-400 animate-spin" />
-          <p className="text-pink-500 font-medium">Chargement de la playlist…</p>
-        </div>
-      )}
-      {phase === 'picking' && <HeartLoader />}
+      {isRevealing && <HeartLoader />}
 
-      {/* Revealed song */}
-      {currentUrl && phase === 'idle' && (
+      {currentUrl && !isRevealing && (
         <div className="w-full max-w-sm animate-fadeIn flex flex-col gap-3">
           <div className="flex items-center gap-2 text-pink-500 font-semibold">
             <Music className="w-4 h-4" />
@@ -252,8 +169,7 @@ function MaminetteTab({ songs }) {
         </div>
       )}
 
-      {/* Empty state */}
-      {songs.length === 0 && phase === 'idle' && (
+      {songs.length === 0 && !isRevealing && (
         <p className="text-pink-300 text-sm text-center px-4">
           Pas encore de chanson disponible… Bruno va en ajouter bientôt !
         </p>
@@ -267,8 +183,6 @@ function MaminetteTab({ songs }) {
 // ---------------------------------------------------------------------------
 
 function BrunoTab({ songs }) {
-  const hasPlaylist = songs.some(url => extractPlaylistId(url) !== null)
-
   return (
     <div className="px-4 py-6 flex flex-col gap-5">
       <div className="text-center">
@@ -276,41 +190,7 @@ function BrunoTab({ songs }) {
         <p className="text-amber-500 text-sm mt-1">Panneau d'administration 🎛️</p>
       </div>
 
-      {/* Spotify API setup (shown only when a playlist is in songs.json) */}
-      {hasPlaylist && (
-        <div className="bg-purple-50 border border-purple-200 rounded-2xl p-4 flex flex-col gap-3">
-          <div className="flex items-center gap-2 text-purple-700 font-semibold">
-            <AlertCircle className="w-5 h-5 flex-shrink-0 text-purple-500" />
-            Configuration Spotify requise
-          </div>
-          <p className="text-purple-600 text-sm">
-            Pour extraire les chansons d'une playlist, ajoute tes clés Spotify dans Netlify (une seule fois) :
-          </p>
-          <ol className="text-purple-700 text-sm space-y-2 list-none">
-            {[
-              <>Va sur <strong>developer.spotify.com/dashboard</strong> → crée une appli gratuite</>,
-              <>Copie le <strong>Client ID</strong> et le <strong>Client Secret</strong></>,
-              <>Dans Netlify → <strong>Site settings → Environment variables</strong>, ajoute :</>,
-            ].map((step, i) => (
-              <li key={i} className="flex gap-3 items-start">
-                <span className="flex-shrink-0 w-6 h-6 bg-purple-200 text-purple-700 rounded-full flex items-center justify-center text-xs font-bold mt-0.5">
-                  {i + 1}
-                </span>
-                <span>{step}</span>
-              </li>
-            ))}
-          </ol>
-          <div className="bg-white border border-purple-200 rounded-xl p-3 font-mono text-xs text-purple-700 space-y-1">
-            <p><span className="text-purple-400">clé</span> → <strong>SPOTIFY_CLIENT_ID</strong></p>
-            <p><span className="text-purple-400">clé</span> → <strong>SPOTIFY_CLIENT_SECRET</strong></p>
-          </div>
-          <p className="text-purple-600 text-xs">
-            Ensuite, redéploie le site depuis le dashboard Netlify. C'est tout ! 🎉
-          </p>
-        </div>
-      )}
-
-      {/* How to add / change the playlist */}
+      {/* How it works */}
       <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex flex-col gap-3 shadow-sm">
         <div className="flex items-center gap-2 text-amber-700 font-semibold">
           <Info className="w-5 h-5 flex-shrink-0 text-amber-500" />
@@ -318,10 +198,10 @@ function BrunoTab({ songs }) {
         </div>
         <ol className="text-amber-700 text-sm space-y-2 list-none">
           {[
-            <>Va sur ton dépôt <strong>GitHub</strong></>,
-            <>Ouvre <code className="bg-amber-100 px-1.5 py-0.5 rounded font-mono text-xs">public/songs.json</code> et clique ✏️</>,
-            <>Remplace l'URL par l'URL de ta <strong>playlist Spotify</strong></>,
-            <>Valide avec <strong>"Commit changes"</strong> — Netlify redéploie automatiquement ✅</>,
+            <>Va sur ton dépôt GitHub → ouvre <code className="bg-amber-100 px-1.5 py-0.5 rounded font-mono text-xs">public/songs.source.json</code></>,
+            <>Remplace l'URL par celle de ta <strong>playlist Spotify</strong> et valide</>,
+            <>GitHub lance automatiquement un script qui extrait tous les titres de la playlist</>,
+            <>Le site se met à jour tout seul en quelques secondes ✅</>,
           ].map((step, i) => (
             <li key={i} className="flex gap-3 items-start">
               <span className="flex-shrink-0 w-6 h-6 bg-amber-200 text-amber-700 rounded-full flex items-center justify-center text-xs font-bold mt-0.5">
@@ -332,21 +212,33 @@ function BrunoTab({ songs }) {
           ))}
         </ol>
         <div className="bg-white border border-amber-200 rounded-xl p-3 mt-1">
-          <p className="text-xs text-amber-500 font-semibold mb-1.5 uppercase tracking-wide">Exemple</p>
+          <p className="text-xs text-amber-500 font-semibold mb-1.5 uppercase tracking-wide">songs.source.json</p>
           <pre className="text-xs text-amber-700 font-mono whitespace-pre-wrap break-all">
-{`["https://open.spotify.com/playlist/TON_ID_ICI"]`}
+{`["https://open.spotify.com/playlist/TON_ID"]`}
           </pre>
         </div>
-        <p className="text-xs text-amber-500">
-          Tu peux aussi mélanger playlists et titres individuels dans le tableau.
-        </p>
+
+        {/* One-time Spotify setup */}
+        <div className="bg-amber-100 rounded-xl p-3 flex flex-col gap-2">
+          <p className="text-xs text-amber-700 font-semibold uppercase tracking-wide">Configuration unique (à faire une fois)</p>
+          <p className="text-xs text-amber-600">
+            Va sur <strong>developer.spotify.com/dashboard</strong> → crée une appli gratuite → copie le <strong>Client ID</strong> et <strong>Client Secret</strong>.
+          </p>
+          <p className="text-xs text-amber-600">
+            Puis dans GitHub → Settings → <strong>Secrets and variables → Actions</strong> → ajoute :
+          </p>
+          <div className="bg-white rounded-lg p-2 font-mono text-xs text-amber-700 space-y-0.5">
+            <p>SPOTIFY_CLIENT_ID</p>
+            <p>SPOTIFY_CLIENT_SECRET</p>
+          </div>
+        </div>
       </div>
 
-      {/* Current songs.json content */}
+      {/* Current track list */}
       <div className="flex flex-col gap-3">
         <div className="flex items-center gap-2 text-pink-600 font-semibold">
           <ListMusic className="w-5 h-5" />
-          Contenu actuel de songs.json
+          Chansons disponibles
           <span className="ml-auto bg-pink-100 text-pink-500 text-xs font-bold px-2.5 py-0.5 rounded-full">
             {songs.length}
           </span>
@@ -355,13 +247,12 @@ function BrunoTab({ songs }) {
         {songs.length === 0 ? (
           <div className="text-center py-10">
             <Music className="w-14 h-14 mx-auto mb-3 text-pink-200" />
-            <p className="text-pink-300 text-sm">Aucun lien dans songs.json</p>
+            <p className="text-pink-300 text-sm">Aucune chanson pour l'instant</p>
           </div>
         ) : (
           <div className="flex flex-col gap-2">
             {songs.map((url, i) => {
-              const { key, label } = getUrlType(url)
-              const isPlaylist = key === 'playlist'
+              const typeLabel = getTypeLabel(url)
               const match = url.match(/open\.spotify\.com\/(?:track|album|playlist|episode|show)\/([a-zA-Z0-9]+)/)
               const shortId = match?.[1]?.substring(0, 12) ?? '???'
 
@@ -371,33 +262,13 @@ function BrunoTab({ songs }) {
                   href={url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="
-                    flex items-center gap-3 bg-white rounded-xl p-3
-                    shadow-sm border transition-all duration-150
-                    active:scale-[0.98] group
-                    hover:shadow-md
-                    border-pink-100 hover:border-pink-300
-                  "
+                  className="flex items-center gap-3 bg-white rounded-xl p-3 shadow-sm border border-pink-100 hover:border-pink-300 hover:shadow-md active:scale-[0.98] transition-all duration-150 group"
                 >
-                  <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${
-                    isPlaylist
-                      ? 'bg-gradient-to-br from-purple-100 to-violet-100'
-                      : 'bg-gradient-to-br from-pink-100 to-rose-100'
-                  }`}>
-                    {isPlaylist
-                      ? <ListMusic className="w-4 h-4 text-purple-400" />
-                      : <Music className="w-4 h-4 text-pink-400" />
-                    }
+                  <div className="w-9 h-9 bg-gradient-to-br from-pink-100 to-rose-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                    <Music className="w-4 h-4 text-pink-400" />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <p className={`text-xs font-medium ${isPlaylist ? 'text-purple-400' : 'text-pink-400'}`}>
-                      {label}
-                      {isPlaylist && (
-                        <span className="ml-1.5 bg-purple-100 text-purple-500 text-xs px-1.5 py-0.5 rounded-full font-semibold">
-                          auto-expand
-                        </span>
-                      )}
-                    </p>
+                    <p className="text-xs text-pink-400 font-medium">{typeLabel}</p>
                     <p className="text-sm text-gray-500 truncate font-mono">{shortId}…</p>
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0">
